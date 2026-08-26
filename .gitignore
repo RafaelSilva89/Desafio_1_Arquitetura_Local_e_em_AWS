@@ -1,8 +1,33 @@
-# Anotações pessoais — contêm dados de identificação, não publicar
+# ---- Material bruto / privado (NUNCA publicar) ----
+# Originais de capturas de tela sem tarja nos dados sensiveis.
+# Somente as versoes censuradas entram em imagens/.
+_originais_privados/
+imagens/_originais_privados/
+
+# Anotacoes pessoais — contem dados de identificacao
 Configuracao.txt
 Desafio 1.txt
 
-# Ruído de sistema
+# PDFs de apoio (contem Account ID e IDs de recurso REAIS, sem tarja)
+*.pdf
+
+# ---- Credenciais e chaves ----
+*.pem
+*.ppk
+*.csv
+.aws/
+credentials*
+*_accessKeys*
+
+# ---- Ambiente ----
+.env
+.env.*
+node_modules/
+
+# ---- Rascunhos pessoais ----
+post-linkedin.txt
+
+# ---- Ruido de sistema ----
 desktop.ini
 Thumbs.db
 .DS_Store
