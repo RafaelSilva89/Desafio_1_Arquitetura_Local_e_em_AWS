@@ -7,6 +7,11 @@ imagens/_originais_privados/
 # Anotacoes pessoais — contem dados de identificacao
 Configuracao.txt
 Desafio 1.txt
+Git e Docker.txt
+
+# Original em alta resolucao do infografico; a versao publicada
+# vive em imagens/git-docker/masterclass-fluxo-git-docker.png
+Masterclass__Fluxo_de_Containers.png
 
 # PDFs de apoio (contem Account ID e IDs de recurso REAIS, sem tarja)
 *.pdf

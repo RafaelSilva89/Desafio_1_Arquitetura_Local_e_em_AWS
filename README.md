@@ -72,6 +72,23 @@
 - [Provas de execução](#-provas-de-execução)
 - [Checklist de entrega](#-checklist-de-entrega)
 - [O que aprendi](#-o-que-aprendi)
+- **[Apêndice — Fundamentos de Git e Docker](#-apêndice--fundamentos-de-git-e-docker)**
+  - [A. O problema que Git e Docker resolvem](#a-o-problema-que-git-e-docker-resolvem)
+  - [B. As três áreas do Git](#b-as-três-áreas-do-git)
+  - [C. Ignorar arquivos e guardar trabalho pela metade](#c-ignorar-arquivos-e-guardar-trabalho-pela-metade)
+  - [D. Sincronizando com o GitHub](#d-sincronizando-com-o-github)
+  - [E. Branches, merge e Pull Request](#e-branches-merge-e-pull-request)
+  - [F. Referência rápida do Git](#f-referência-rápida-do-git)
+  - [G. Container não é máquina virtual](#g-container-não-é-máquina-virtual)
+  - [H. Dockerfile — a receita](#h-dockerfile--a-receita)
+  - [I. Build — da receita à imagem](#i-build--da-receita-à-imagem)
+  - [J. Run — da imagem ao container](#j-run--da-imagem-ao-container)
+  - [K. Compose — orquestrando vários serviços](#k-compose--orquestrando-vários-serviços)
+  - [L. Onde ficam as imagens](#l-onde-ficam-as-imagens)
+  - [M. Rodar o Docker sem sudo](#m-rodar-o-docker-sem-sudo)
+  - [N. Limpeza do ambiente](#n-limpeza-do-ambiente)
+  - [O. O fluxo mental completo](#o-o-fluxo-mental-completo)
+  - [P. Checklist de validação](#p-checklist-de-validação)
 - [Créditos e referências](#-créditos-e-referências)
 
 ---
@@ -1420,6 +1437,849 @@ Cada exigência do desafio e onde está a evidência dela neste documento.
   imagem: mudar variável de ambiente no `docker run` não resolve, é preciso reconstruir.
 - **Custo é responsabilidade técnica.** Budget configurado antes do primeiro recurso e destruição do
   ambiente ao final fazem parte do trabalho, não são um extra.
+
+---
+
+## 🧩 Apêndice — Fundamentos de Git e Docker
+
+> ### Por que este apêndice existe
+>
+> As 22 etapas acima mostram **o que foi feito**. Este apêndice explica **por que funciona** — o que
+> cada comando de Git e de Docker realmente faz por baixo.
+>
+> Ele é autônomo: dá para ler antes do laboratório, para entender o terreno, ou depois, como material
+> de consulta. A estrutura é a mesma do resto do documento — **o que vamos fazer**, **os comandos** e
+> **como saber que deu certo**.
+>
+> **Regra deste apêndice:** nenhum comando aparece sem explicação de uso. Toda opção (`-t`, `-i`,
+> `-d`, `-p`, `-a`, `-f`, `-v`) é explicada na primeira vez em que aparece.
+
+![Infográfico da masterclass Git Essentials e Docker Practice: o desafio da inconsistência entre ambientes, a visão geral do código ao container, as quatro etapas (versão local, sincronização em nuvem, build do molde e instanciação) e o resultado final de eficiência](imagens/git-docker/masterclass-fluxo-git-docker.png)
+
+Esse infográfico é o mapa completo do caminho. Ele se lê em quatro movimentos, e é exatamente essa a
+ordem das subseções abaixo:
+
+| # | Movimento | Ferramenta | O que entra | O que sai |
+| :-: | --- | --- | --- | --- |
+| **01** | Gestão de versão local | Git | Arquivos editados | Um *snapshot* gravado no histórico (`.git`) |
+| **02** | Sincronização em nuvem | GitHub | Commits locais | Repositório remoto pronto para colaboração |
+| **03** | Construção do molde | Docker Engine | Um `Dockerfile` | Uma **imagem** imutável com tudo dentro |
+| **04** | Instanciação e execução | Docker Container | Uma imagem | A aplicação **rodando**, isolada e leve |
+
+> 💡 Git e Docker resolvem **problemas diferentes**, mas encaixados. O Git versiona o **código**;
+> o Docker versiona o **ambiente**. Juntos, respondem "que versão é essa?" e "onde ela roda?".
+
+---
+
+### A. O problema que Git e Docker resolvem
+
+**O que vamos entender:** por que estas duas ferramentas existem. Sem isso, os comandos das próximas
+seções viram decoreba.
+
+![Contexto e objetivo do desafio: à esquerda, o problema das pastas versao1, versao-final e agora-vai e a frase "na minha máquina funciona"; à direita, o objetivo de um fluxo versionado com Git e conteinerizado com Docker](imagens/git-docker/contexto-problema-objetivo.png)
+
+| Problema real | Como ele aparece no dia a dia | Quem resolve |
+| --- | --- | --- |
+| Não sei qual versão é a boa | Pastas `projeto`, `projeto-final`, `projeto-final-2`, `agora-vai` | **Git** — um histórico só, linear e rastreável |
+| Sobrescrevi o trabalho de alguém | Dois arquivos colidem e um deles some | **Git** — branches e *merge* controlado |
+| Não sei quem mudou o quê, nem quando | Ninguém consegue explicar como o bug entrou | **Git** — cada commit tem autor, data e mensagem |
+| "Na minha máquina funciona" | Roda no notebook do dev e quebra no servidor | **Docker** — o ambiente inteiro vira um pacote |
+| Configurar o ambiente leva um dia | Cada máquina nova exige um roteiro de instalação | **Docker** — `docker compose up -d` e pronto |
+
+A frase da imagem — *"na minha máquina funciona"* — é o sintoma clássico. Ela acontece porque o
+código é apenas metade do que faz um programa rodar; a outra metade é a **versão do Node, a versão
+do PostgreSQL, as variáveis de ambiente, as bibliotecas do sistema**. O Git leva a primeira metade
+para o servidor. O Docker leva a segunda.
+
+> 💡 É por isso que o Desafio 1 prova que a **aplicação não muda** entre o notebook e a EC2. A mesma
+> imagem sobe nos dois lugares — o que muda é só a infraestrutura debaixo dela.
+
+---
+
+### B. As três áreas do Git
+
+**O que vamos fazer:** entender por onde um arquivo passa até virar história gravada. Este é o
+conceito que faz o `git add` deixar de parecer burocracia.
+
+![Fluxo das três áreas do Git: a Área de Trabalho envia arquivos para o Staging com git add, o Staging grava no Repositório Local com git commit, e a Gaveta Stash guarda alterações temporárias](imagens/git-docker/git-tres-areas.png)
+
+| Área | Onde fica | O que vive nela | Como se sai dela |
+| --- | --- | --- | --- |
+| **Área de trabalho** (*working directory*) | Os arquivos que você enxerga na pasta | Tudo que você está editando agora | `git add` |
+| **Staging / Index** (*preparação*) | Um "carrinho de compras" invisível | Só o que você escolheu para o próximo commit | `git commit` |
+| **Repositório local** | A pasta oculta `.git` | O histórico permanente, commit a commit | `git push` |
+
+A grande sacada: **você escolhe o que entra em cada commit**. Se mexeu em cinco arquivos mas só três
+pertencem à mesma ideia, adicione apenas esses três. O histórico fica legível.
+
+#### Criando o repositório e o primeiro commit
+
+```bash
+git init                         # cria a pasta oculta .git — a partir daqui a pasta é versionada
+git status                       # mostra o que mudou e em que área cada arquivo está
+git add README.md                # move UM arquivo para a área de staging
+git add .                        # move TODOS os arquivos modificados (o "." é "daqui pra baixo")
+git commit -m "Primeira versao"  # grava no histórico o que estava em staging; -m é a mensagem
+git log --oneline                # lista o histórico, um commit por linha
+```
+
+| Comando | O que faz | Quando usar |
+| --- | --- | --- |
+| `git init` | Transforma a pasta em repositório, criando o `.git` | Uma única vez, no início de um projeto novo |
+| `git status` | Diz o estado de cada arquivo | **Sempre.** Antes do `add`, antes do `commit`, quando estiver perdido |
+| `git add <arquivo>` | Manda um arquivo específico para o staging | Quando quer um commit enxuto, com um assunto só |
+| `git add .` | Manda tudo que mudou para o staging | Quando todas as mudanças pertencem à mesma ideia |
+| `git commit -m "texto"` | Grava permanentemente o que está em staging | Ao terminar uma unidade de trabalho que faça sentido sozinha |
+| `git log --oneline` | Mostra o histórico resumido | Para conferir o que já foi gravado |
+
+**Como saber que deu certo:** o `git status` sai do vermelho, passa pelo verde e termina limpo.
+
+```text
+$ git status
+On branch main
+Changes not staged for commit:
+        modified:   README.md          <- vermelho: mudou, mas está fora do staging
+
+$ git add README.md
+$ git status
+On branch main
+Changes to be committed:
+        modified:   README.md          <- verde: pronto para o commit
+
+$ git commit -m "Adiciona apendice de Git e Docker"
+[main a1b2c3d] Adiciona apendice de Git e Docker
+ 1 file changed, 480 insertions(+)
+
+$ git status
+On branch main
+nothing to commit, working tree clean    <- nada pendente: tudo virou história
+```
+
+> 💡 **Uma boa mensagem de commit completa a frase "Se aplicado, este commit vai…"**. `"Corrige o
+> mapeamento da porta 3001"` é útil. `"ajustes"` não diz nada para o você de daqui a seis meses.
+
+---
+
+### C. Ignorar arquivos e guardar trabalho pela metade
+
+**O que vamos fazer:** duas ferramentas de higiene que evitam os dois acidentes mais comuns —
+commitar o que não devia e perder o que ainda não estava pronto.
+
+#### `.gitignore` — o que nunca deve ser versionado
+
+O `.gitignore` é um arquivo de texto na raiz do projeto. Cada linha é uma regra do que o Git deve
+**fingir que não existe**. Ele não apaga nada do disco; apenas mantém o arquivo fora do repositório.
+
+```gitignore
+# ---- Credenciais e chaves (o motivo número 1 para existir um .gitignore) ----
+*.pem                # chaves privadas de acesso a servidores
+*.ppk                # o mesmo formato, na versão PuTTY
+.env                 # variáveis de ambiente — costumam guardar senha de banco
+credentials*         # arquivos de credencial da AWS e afins
+
+# ---- Ruído que só existe na sua máquina ----
+node_modules/        # a barra final significa "esta pasta inteira"
+Thumbs.db            # cache de miniaturas do Windows
+.DS_Store            # o equivalente do macOS
+
+# ---- Material bruto que não faz parte da entrega ----
+*.pdf                # o asterisco é curinga: qualquer arquivo terminado em .pdf
+```
+
+| Sintaxe | Significa |
+| --- | --- |
+| `arquivo.txt` | Ignora exatamente esse arquivo |
+| `*.pem` | Ignora **qualquer** arquivo com essa extensão (`*` é curinga) |
+| `pasta/` | Ignora a pasta inteira, com tudo dentro |
+| `# comentário` | Linha de comentário — o Git ignora |
+
+> ⚠️ **O `.gitignore` só protege o que ainda não foi commitado.** Se uma chave já entrou no
+> histórico, apagá-la em um commit novo **não** a remove — ela continua recuperável nos commits
+> antigos. Nesse caso, a chave precisa ser considerada vazada e **revogada**. É por isso que a
+> [etapa 5](#5-autenticar-no-github-via-ssh) insiste que apenas o arquivo `.pub` vai para o GitHub.
+
+#### `git stash` — a gaveta
+
+Situação clássica: você está no meio de uma alteração, ela ainda não funciona, e precisa trocar de
+tarefa **agora**. Commitar código quebrado é ruim; perder o trabalho é pior. O `stash` é a terceira
+saída — uma gaveta temporária.
+
+```bash
+git stash        # guarda TODAS as mudanças não commitadas na gaveta e limpa a área de trabalho
+git status       # confirma: a pasta voltou ao último commit, como se você não tivesse mexido
+git stash list   # lista o que está guardado (stash@{0} é o mais recente)
+git stash apply  # devolve as mudanças para a área de trabalho, mantendo uma cópia na gaveta
+git stash pop    # devolve as mudanças E remove da gaveta
+```
+
+**Como saber que deu certo:** depois do `git stash` a árvore fica limpa; depois do `apply` as
+alterações reaparecem.
+
+```text
+$ git stash
+Saved working directory and index state WIP on main: a1b2c3d Ajusta o compose
+
+$ git status
+nothing to commit, working tree clean
+
+$ git stash apply
+On branch main
+Changes not staged for commit:
+        modified:   src/app.js         <- de volta, exatamente como estava
+```
+
+---
+
+### D. Sincronizando com o GitHub
+
+**O que vamos fazer:** conectar o repositório local a um servidor remoto. Até aqui tudo morava só na
+sua máquina — um HD queimado levaria o histórico junto.
+
+![Sincronização entre o computador local e o servidor remoto: git clone baixa o projeto pela primeira vez, git push envia os commits locais e git pull traz as novidades do servidor](imagens/git-docker/git-sincronizacao-remoto.png)
+
+```bash
+# Caminho 1 — o projeto JÁ existe no GitHub e você quer uma cópia
+git clone https://github.com/usuario/projeto.git  # baixa o repositório inteiro, com todo o histórico
+cd projeto                                        # o clone cria a pasta com o nome do projeto
+
+# Caminho 2 — o projeto nasceu na sua máquina e vai subir agora
+git remote add origin https://github.com/usuario/projeto.git  # apelida essa URL de "origin"
+git remote -v                                                 # confere para onde "origin" aponta
+git push -u origin main                                       # envia a branch main e memoriza o destino
+
+# Rotina do dia a dia
+git pull   # traz o que mudou no servidor e junta com o seu código local
+git push   # envia seus commits (o -u da primeira vez dispensa repetir "origin main")
+```
+
+| Comando | O que faz | Detalhe que confunde |
+| --- | --- | --- |
+| `git clone <url>` | Baixa o projeto pela primeira vez | Já cria a pasta e já configura o `origin`. Não precisa de `git init` antes |
+| `git remote add origin <url>` | Registra o endereço do servidor | `origin` é só um **apelido** — a convenção universal para "o servidor principal" |
+| `git push -u origin main` | Envia os commits e fixa o destino | O `-u` (*upstream*) faz os `git push` seguintes funcionarem sem argumentos |
+| `git pull` | Baixa e **já mescla** as novidades | É `git fetch` + `git merge` em um comando só |
+
+**Como saber que deu certo:**
+
+```text
+$ git push -u origin main
+Enumerating objects: 12, done.
+Writing objects: 100% (12/12), 4.21 KiB | 1.05 MiB/s, done.
+To https://github.com/usuario/projeto.git
+ * [new branch]      main -> main
+branch 'main' set up to track 'origin/main'.
+```
+
+E, no navegador, os arquivos aparecem na página do repositório.
+
+> 💡 **Faça `git pull` antes de começar a trabalhar.** É o hábito que evita a maior parte dos
+> conflitos: você parte do código mais recente, em vez de descobrir a divergência só na hora do push.
+
+> 💡 A [etapa 5](#5-autenticar-no-github-via-ssh) configura a autenticação por **SSH**, que dispensa
+> digitar usuário e senha a cada push. A [etapa 9](#9-subir-o-projeto-bia) usa o `git clone` na
+> prática, para baixar o projeto BIA.
+
+---
+
+### E. Branches, merge e Pull Request
+
+**O que vamos fazer:** trabalhar em uma ideia nova **sem** arriscar o código que já funciona.
+
+Uma **branch** é uma linha do tempo paralela. Você sai da `main`, faz o que precisa em um mundo à
+parte, e só junta de volta quando estiver pronto.
+
+```text
+   (main)   ●───────●──────────────────────●───────►  (main, agora com a novidade)
+                     \                    /
+   git checkout -b    \                  /   git merge mensagem
+   mensagem            ●───────●────────●
+                          (branch: mensagem)
+```
+
+```bash
+git branch -a             # lista todas as branches; o -a inclui as que existem no servidor
+git checkout -b mensagem  # CRIA a branch "mensagem" e já muda para ela (o -b é o "create")
+# ... edite, git add, git commit à vontade — a main não é tocada ...
+git checkout main         # volta para a main (sem -b, porque a branch já existe)
+git merge mensagem        # traz para a main tudo que foi commitado na branch "mensagem"
+git branch -d mensagem    # apaga a branch já mesclada; o -d só apaga se o merge foi feito
+```
+
+| Comando | O que faz | Quando usar |
+| --- | --- | --- |
+| `git branch -a` | Lista as branches locais e remotas | Para saber onde você está e o que existe |
+| `git checkout -b <nome>` | Cria e entra na branch | Ao começar qualquer coisa que possa dar errado |
+| `git checkout <nome>` | Só troca de branch | Para ir e voltar entre linhas de trabalho |
+| `git merge <nome>` | Junta a branch indicada **na branch atual** | Quando a novidade está testada e pronta |
+| `git branch -d <nome>` | Remove a branch já mesclada | Faxina: branch mesclada não precisa continuar existindo |
+
+#### O Pull Request
+
+O `git merge` junta as coisas direto, na sua máquina. O **Pull Request (PR)** é a versão social
+disso: em vez de mesclar sozinho, você abre um pedido no GitHub — *"por favor, tragam a minha branch
+para a main"* — e alguém revisa antes.
+
+O fluxo completo:
+
+```bash
+git checkout -b minha-melhoria     # 1. cria a branch
+git add .                          # 2. prepara as mudanças
+git commit -m "Descreve a mudanca" # 3. grava no histórico local
+git push -u origin minha-melhoria  # 4. envia a BRANCH para o GitHub (não a main)
+```
+
+5. No GitHub aparece o botão **Compare & pull request**. Clique, descreva o que mudou e abra o PR.
+6. Alguém revisa, comenta e aprova.
+7. **Merge pull request** — o GitHub faz o merge no servidor.
+8. De volta ao terminal: `git checkout main` e `git pull`, para trazer o resultado.
+
+#### Desfazer com segurança
+
+Três comandos que parecem iguais e não são:
+
+| Comando | O que desfaz | Reescreve o histórico? | Quando usar |
+| --- | --- | :-: | --- |
+| `git checkout .` | Alterações **não commitadas** na área de trabalho | Não | Errou a mão em um arquivo e quer voltar ao último commit |
+| `git reset --soft HEAD~1` | O último commit, **mantendo** as mudanças em staging | Sim | Commitou cedo demais e quer refazer a mensagem ou juntar mais coisa |
+| `git revert <hash>` | Um commit antigo, criando um **commit novo** que o anula | Não | O commit ruim já foi para o servidor |
+
+```bash
+git log --pretty=format:%h -n 1  # mostra o hash curto do último commit; -n 1 = só o mais recente
+git revert a1b2c3d               # cria um commit que desfaz exatamente o commit a1b2c3d
+git checkout .                   # descarta o que não foi commitado — NÃO tem desfazer
+```
+
+> ⚠️ **`reset` reescreve o histórico; `revert` não.** Se o commit já foi enviado com `git push`,
+> usar `reset` faz a sua linha do tempo divergir da de todo mundo. Em branch compartilhada, a
+> resposta certa é quase sempre `revert`.
+
+> ⚠️ **`git checkout .` é definitivo.** O que não estava commitado nem guardado no stash não tem
+> como voltar. Na dúvida, `git stash` antes.
+
+---
+
+### F. Referência rápida do Git
+
+Os comandos deste apêndice em uma tabela só, para consulta.
+
+| Comando | Ação principal | Quando usar |
+| --- | --- | --- |
+| `git init` | Inicia um repositório local | Projeto novo, uma vez só |
+| `git clone <url>` | Copia um repositório existente | Para começar a trabalhar em algo que já existe |
+| `git status` | Mostra o estado dos arquivos | Sempre — é a bússola |
+| `git add <arquivo>` | Move um arquivo para o staging | Antes de todo commit |
+| `git add .` | Move tudo que mudou para o staging | Quando as mudanças pertencem à mesma ideia |
+| `git commit -m "texto"` | Grava no histórico | Ao fechar uma unidade de trabalho |
+| `git log --oneline` | Lista o histórico resumido | Para conferir o que já existe |
+| `git branch -a` | Lista as branches | Para se localizar |
+| `git checkout -b <nome>` | Cria e entra na branch | Ao começar algo arriscado |
+| `git checkout <branch>` | Alterna de branch | Para ir e voltar |
+| `git checkout .` | Descarta alterações locais | Errou e quer voltar ao último commit |
+| `git merge <branch>` | Junta a branch indicada na atual | Quando a novidade está pronta |
+| `git push origin <branch>` | Envia commits para o servidor | Ao final do trabalho |
+| `git pull` | Baixa e integra o que veio do servidor | Antes de começar a trabalhar |
+| `git stash` | Guarda mudanças na gaveta | Precisa trocar de tarefa no meio |
+| `git stash apply` | Devolve o que estava na gaveta | Ao retomar a tarefa interrompida |
+| `git reset` | Recua commits locais | Só **antes** do push |
+| `git revert <hash>` | Cria um commit que desfaz outro | **Depois** do push |
+| `.gitignore` | Regras do que não versionar | Desde o primeiro commit |
+
+---
+
+### G. Container não é máquina virtual
+
+**O que vamos entender:** a diferença que explica por que o Docker é leve — e por que este
+laboratório coube em um notebook de 8 GB.
+
+![Comparação das camadas: na Máquina Virtual, App sobre SO Convidado sobre Hypervisor sobre SO Host sobre Hardware; no Docker, App sobre Container sobre Docker Engine sobre SO Host compartilhado sobre Hardware](imagens/git-docker/docker-x-vm.png)
+
+A diferença está em **o que é virtualizado**:
+
+- A **máquina virtual** virtualiza o **hardware**. Um programa chamado *hypervisor* (VirtualBox,
+  VMware) finge ser um computador inteiro, e dentro dele roda um **sistema operacional completo**,
+  com kernel próprio. Cada VM carrega o peso de um SO inteiro.
+- O **container** virtualiza o **sistema operacional**. Ele **compartilha o kernel do host** e usa
+  recursos de isolamento do próprio Linux para separar os processos. Não existe um segundo SO.
+
+> O **kernel** é o núcleo do sistema operacional: a peça que faz a ponte entre os programas e o
+> hardware. Compartilhá-lo é o que torna o container leve — não é preciso carregar outro.
+
+```text
+MÁQUINA VIRTUAL                          DOCKER
+App                                      App
+ └── SO Convidado (kernel próprio)        └── Container
+      └── Hypervisor                           └── Docker Engine
+           └── SO Host                              └── SO Host (kernel COMPARTILHADO)
+                └── Hardware                             └── Hardware
+```
+
+| | Docker (container) | Máquina virtual |
+| --- | --- | --- |
+| O que virtualiza | O ambiente da aplicação | O hardware inteiro |
+| Sistema operacional | Compartilha o kernel do host | Cada VM tem o seu, completo |
+| Tamanho típico | Megabytes | Gigabytes |
+| Tempo para iniciar | Segundos ou menos | Dezenas de segundos a minutos |
+| Camada de gerência | Docker Engine | Hypervisor |
+| *Overhead* | Menor | Maior |
+| Isolamento | Isolamento de processos | Isolamento mais completo |
+
+> **Overhead** é o custo de recursos gasto para *manter a tecnologia de pé*, não para fazer o
+> trabalho útil. Na VM, esse custo é um sistema operacional inteiro por máquina — com seus próprios
+> processos, serviços, CPU, memória e disco.
+
+> 💡 É o mesmo raciocínio da seção [Por que WSL 2 e não uma máquina virtual](#por-que-wsl-2-e-não-uma-máquina-virtual):
+> em um i3 com 8 GB, subir um SO completo no VirtualBox significaria dois sistemas operacionais
+> disputando a mesma memória. O WSL 2 aplica ao Linux a mesma ideia que o Docker aplica à aplicação —
+> compartilhar em vez de duplicar.
+
+---
+
+### H. Dockerfile — a receita
+
+**O que vamos fazer:** escrever o arquivo que descreve, passo a passo, como construir o ambiente da
+aplicação. Ele é **declarativo**: você diz o que quer, não como fazer.
+
+![Anatomia de um Dockerfile: a linha FROM ubuntu:18.04 define a imagem base, WORKDIR /usr define o diretório de trabalho interno e RUN apt-get update executa um comando durante a construção da imagem](imagens/git-docker/dockerfile-anatomia.png)
+
+O Dockerfile mínimo da imagem acima:
+
+```dockerfile
+FROM ubuntu:18.04            # imagem BASE: o ponto de partida pronto, baixado do Docker Hub
+WORKDIR /usr                 # diretório de trabalho: os comandos seguintes rodam a partir daqui
+RUN apt-get update -y        # executa um comando DURANTE o build; o -y responde "sim" às perguntas
+RUN apt-get install nano -y  # cada RUN vira uma camada nova, gravada dentro da imagem
+```
+
+As instruções que resolvem 90% dos casos:
+
+| Instrução | O que faz | Exemplo |
+| --- | --- | --- |
+| `FROM` | Define a **imagem base** — de onde você parte | `FROM node:22` |
+| `WORKDIR` | Define o diretório de trabalho dentro da imagem; cria se não existir | `WORKDIR /app` |
+| `COPY` | Copia arquivos **do seu computador** para dentro da imagem | `COPY . /app` |
+| `RUN` | Executa um comando **na hora do build** e grava o resultado em uma camada | `RUN npm install` |
+| `EXPOSE` | **Documenta** qual porta a aplicação usa (não publica nada sozinho) | `EXPOSE 8080` |
+| `CMD` | O comando que roda **quando o container inicia** | `CMD ["npm", "start"]` |
+
+Um Dockerfile realista, comentado linha a linha:
+
+```dockerfile
+FROM node:22          # parte de uma imagem que já vem com o Node 22 instalado
+WORKDIR /app          # tudo daqui em diante acontece dentro de /app
+COPY package*.json ./ # copia SÓ os arquivos de dependência primeiro...
+RUN npm install       # ...para que o cache do Docker reaproveite esta camada
+COPY . .              # agora sim, copia o resto do código-fonte
+EXPOSE 8080           # documenta: esta aplicação escuta na porta 8080
+CMD ["npm", "start"]  # ao iniciar o container, execute "npm start"
+```
+
+> 💡 **Por que copiar o `package.json` antes do código?** O Docker guarda cada instrução em uma
+> camada e reaproveita as que não mudaram. Se o código mudou mas as dependências não, o `npm install`
+> vem do cache — e o build que levava minutos passa a levar segundos.
+
+> ⚠️ **`RUN` e `CMD` não são a mesma coisa.** O `RUN` acontece **uma vez, no build**, e o resultado
+> fica gravado na imagem. O `CMD` acontece **toda vez que um container sobe**. Confundir os dois é o
+> erro mais comum de quem está começando.
+
+**Conceito-chave:** o Dockerfile é **apenas a receita**. Ele não roda a aplicação — só descreve como
+preparar o terreno.
+
+---
+
+### I. Build — da receita à imagem
+
+**O que vamos fazer:** transformar o Dockerfile em uma **imagem**: um pacote imutável com o código,
+as bibliotecas, as dependências e as configurações — tudo o que a aplicação precisa para rodar.
+
+![Processo de build: o Dockerfile, a receita, passa pelo comando docker build -t teste-windows e vira uma imagem Docker imutável de 102 MB](imagens/git-docker/docker-build-imagem.png)
+
+```bash
+docker build -t teste-windows .  # constrói a imagem a partir do Dockerfile do diretório atual
+```
+
+Cada pedaço do comando:
+
+```text
+docker build
+└── Lê o Dockerfile e executa as instruções, uma a uma
+
+-t teste-windows
+└── -t de "tag": dá um NOME à imagem. Sem isso ela nasce sem nome e só é
+    identificável por um ID hexadecimal impossível de decorar
+
+.
+└── O contexto de build: qual pasta o Docker pode enxergar para copiar arquivos.
+    O ponto significa "a pasta atual". É por isso que o COPY do Dockerfile
+    consegue encontrar o seu código
+```
+
+**Como saber que deu certo:** a imagem aparece na listagem local.
+
+```bash
+docker images    # lista as imagens que existem nesta máquina
+docker image ls  # exatamente o mesmo comando, na sintaxe mais nova
+```
+
+```text
+REPOSITORY       TAG       IMAGE ID       CREATED          SIZE
+teste-windows    latest    be8d1a2c3f45   3 seconds ago    102MB
+```
+
+| Coluna | O que significa |
+| --- | --- |
+| `REPOSITORY` | O nome que você deu com o `-t` |
+| `TAG` | A versão. Se você não indicar nada, o Docker assume `latest` |
+| `IMAGE ID` | Identificador único, gerado a partir do conteúdo da imagem |
+| `SIZE` | Quanto a imagem ocupa em disco |
+
+> 💡 Para versionar de verdade, coloque a versão na tag: `docker build -t minha-app:1.2.0 .`.
+> Assim dá para voltar a uma versão anterior sem reconstruir nada.
+
+---
+
+### J. Run — da imagem ao container
+
+**O que vamos fazer:** dar vida à imagem. A analogia que fecha a questão:
+
+> **Imagem = o molde. Container = o objeto criado a partir do molde.**
+
+De um mesmo molde saem quantos objetos você quiser, e nenhum deles altera o molde.
+
+![Execução do container: modo interativo com docker run -ti e modo background com docker run -d -p 8009:80, uma imagem gerando três containers em execução e o aviso de que containers são efêmeros](imagens/git-docker/docker-run-container.png)
+
+#### Modo interativo — entrar no container pelo terminal
+
+```bash
+docker run -ti ubuntu:18.04  # cria o container e conecta o seu terminal a ele
+```
+
+```text
+-t
+└── Aloca um terminal (TTY) dentro do container
+
+-i
+└── Mantém a entrada padrão (STDIN) aberta, para você poder digitar
+
+-ti (juntos)
+└── "quero um terminal e quero digitar nele" — é assim que se explora
+    um container por dentro
+```
+
+Use quando quiser **investigar**: ver que arquivos existem lá dentro, testar um comando, entender por
+que algo não funciona. Digite `exit` para sair.
+
+#### Modo background — rodar como servidor
+
+```bash
+docker run -d -p 8009:80 minha-aplicacao  # sobe o container em segundo plano e publica a porta
+```
+
+```text
+-d
+└── "detached": roda em segundo plano e devolve o terminal para você.
+    Sem o -d, o terminal fica preso mostrando os logs
+
+-p 8009:80
+└── Mapeamento de portas, sempre no formato PORTA_DO_HOST:PORTA_DO_CONTAINER.
+    A aplicação escuta na 80 lá dentro; você acessa pela 8009 aqui fora
+```
+
+```text
+Seu computador
+     │  http://localhost:8009
+     ▼
+┌──────────────────────┐
+│      Container       │
+│   escutando na 80    │
+└──────────────────────┘
+```
+
+> 💡 É exatamente o que a [etapa 9](#9-subir-o-projeto-bia) faz com `3001:8080` — a aplicação BIA
+> escuta na `8080` dentro do container e responde na `3001` do seu navegador. O número da **esquerda
+> é sempre o host**; o da **direita, o container**. A seção
+> [Entendendo o mapeamento de portas](#entendendo-o-mapeamento-de-portas) detalha esse caso.
+
+#### Gerenciando containers em execução
+
+```bash
+docker ps                    # lista os containers RODANDO agora
+docker ps -a                 # lista TODOS, inclusive os parados (-a de "all")
+docker logs <nome-ou-id>     # mostra o que o container imprimiu no terminal
+docker logs -f <nome-ou-id>  # o mesmo, em tempo real (-f de "follow"; saia com Ctrl+C)
+docker exec -ti <nome> bash  # abre um terminal DENTRO de um container que já está rodando
+docker stop <nome-ou-id>     # para o container com delicadeza
+docker rm <nome-ou-id>       # remove o container parado
+```
+
+| Comando | Quando usar |
+| --- | --- |
+| `docker ps` | "Está no ar?" |
+| `docker ps -a` | "Subiu e morreu?" — o container que falhou aparece aqui, com o código de saída |
+| `docker logs -f` | "Por que não funciona?" — a resposta quase sempre está aqui |
+| `docker exec -ti <nome> bash` | "Como está lá dentro?" — entra no container **sem** derrubá-lo |
+| `docker stop` / `docker rm` | Faxina: o `stop` desliga, o `rm` remove |
+
+> ⚠️ **Container é efêmero.** O que a aplicação escreveu no sistema de arquivos do container **some**
+> quando ele é removido. Para o dado sobreviver, ele precisa estar em um **volume** ou em um
+> armazenamento externo. A imagem original, essa, nunca é alterada — sempre dá para criar um
+> container novo e idêntico a partir dela. A [etapa 12](#12-provar-a-persistência-dos-dados) é
+> justamente a prova prática disso.
+
+---
+
+### K. Compose — orquestrando vários serviços
+
+**O que vamos fazer:** parar de subir container por container na mão. Uma aplicação real quase nunca
+é um container só — a BIA são três: aplicação, banco e cache.
+
+![Orquestração com Docker Compose: um arquivo compose.yaml define três serviços (Node, Postgres e Redis) e o comando docker compose up -d --build sobe toda a infraestrutura de uma vez](imagens/git-docker/docker-compose-orquestracao.png)
+
+O **Docker Compose** lê um arquivo `compose.yaml` (ou `docker-compose.yml`) que descreve todos os
+serviços, as portas, os volumes e a rede entre eles. Um comando sobe o conjunto inteiro.
+
+```text
+Projeto
+│
+├── Dockerfile        <- COMO construir a imagem da sua aplicação
+└── compose.yaml      <- COMO os serviços sobem e conversam entre si
+```
+
+```bash
+docker compose build             # apenas constrói as imagens definidas no compose.yaml
+docker compose up                # cria e inicia os containers, prendendo o terminal nos logs
+docker compose up -d             # o mesmo, em segundo plano (-d de "detached")
+docker compose up -d --build     # reconstrói as imagens ANTES de subir, em segundo plano
+docker compose ps                # mostra o estado dos serviços deste projeto
+docker compose logs -f           # acompanha os logs de todos os serviços (Ctrl+C sai sem derrubar)
+docker compose logs -f server    # acompanha os logs de UM serviço específico
+docker compose exec server bash  # abre um terminal dentro do serviço "server"
+docker compose down              # para e remove os containers e a rede criada
+docker compose down -v           # o mesmo, e TAMBÉM apaga os volumes nomeados
+```
+
+| Comando | O que faz | Quando usar |
+| --- | --- | --- |
+| `up -d` | Sobe tudo em segundo plano | Rotina do dia a dia |
+| `up -d --build` | Reconstrói as imagens e sobe | Depois de mexer no `Dockerfile` ou em algo que entra na imagem |
+| `ps` | Estado dos serviços: `Up`, `Exited`, `Created` | Primeira coisa a rodar quando algo não responde |
+| `logs -f` | Logs em tempo real | Para investigar erro de aplicação |
+| `exec <serviço> bash` | Terminal dentro de um serviço no ar | Rodar migrations, inspecionar o banco |
+| `down` | Para e remove containers e rede | Encerrar o trabalho do dia |
+| `down -v` | O mesmo, **e apaga os volumes** | Só quando você **quer mesmo** zerar os dados |
+
+> ⚠️ **O `-v` do `down` é a armadilha mais cara deste documento.** O `docker compose down` preserva
+> os volumes — os dados do banco sobrevivem e voltam no próximo `up`. O `docker compose down -v`
+> apaga os volumes junto: o banco volta vazio e as migrations precisam ser rodadas de novo. É
+> literalmente a linha "Os dados sumiram depois de reiniciar" da tabela de
+> [Solução de problemas](#-solução-de-problemas).
+
+> 💡 A [etapa 8](#8-smoke-test-do-docker-compose) usa o Compose em um teste mínimo antes de encarar o
+> projeto real, e a [etapa 10](#10-rodar-as-migrations-do-banco) usa o `exec` para criar o schema do
+> banco dentro do container que já estava no ar.
+
+---
+
+### L. Onde ficam as imagens
+
+**O que vamos entender:** uma dúvida que aparece assim que você tem mais de um projeto — as imagens
+ficam guardadas dentro da pasta do projeto?
+
+**Não.** A pasta do projeto guarda a *receita*; a imagem construída mora em um repositório central,
+dentro do Docker Engine da sua máquina.
+
+![Arquitetura de múltiplos projetos: três projetos isolados, cada um com seu Dockerfile e compose.yaml, produzindo três imagens armazenadas no repositório central do Docker Engine](imagens/git-docker/onde-ficam-as-imagens.png)
+
+```text
+Projeto A            Projeto B            Projeto C
+├── Dockerfile       ├── Dockerfile       ├── Dockerfile
+└── compose.yaml     └── compose.yaml     └── compose.yaml
+      │                    │                    │
+      └────────────────────┴────────────────────┘
+                           │  docker build
+                           ▼
+                 Docker Engine (Docker Desktop)
+                 ├── Imagem projeto-a
+                 ├── Imagem projeto-b
+                 ├── Imagem projeto-c
+                 ├── Imagem postgres:17.1
+                 └── Imagem valkey:8.1-alpine
+```
+
+**A regra:** cada projeto com finalidade diferente tem o **seu próprio Dockerfile**. Um projeto em
+Node, um em Python e um que é banco + API não cabem em uma receita só — e nem deveriam. Cada
+Dockerfile gera a sua imagem, e todas convivem no mesmo Docker Engine.
+
+```bash
+docker images  # comprova: todas as imagens da máquina, de todos os projetos, em uma lista só
+```
+
+> 💡 É por isso que a captura do Docker Desktop na seção de
+> [Pré-requisitos](#-pré-requisitos) mostra, lado a lado, `bia-server`, `postgres`, `valkey`, `nginx`
+> e `hello-world`: são imagens de origens diferentes, todas no mesmo repositório local.
+
+---
+
+### M. Rodar o Docker sem sudo
+
+**O que vamos fazer:** eliminar o `Permission denied` que aparece ao usar o Docker no Linux sem
+privilégio — sem precisar escrever `sudo` em cada comando.
+
+O erro:
+
+```text
+permission denied while trying to connect to the Docker daemon socket
+```
+
+Ele acontece porque o Docker conversa por um *socket* que, por padrão, pertence ao grupo `docker`.
+Se o seu usuário não está nesse grupo, o acesso é negado. A solução é entrar no grupo:
+
+```bash
+sudo usermod -aG docker $USER  # adiciona o usuário atual ao grupo docker; -aG = "append to Group"
+newgrp docker                  # aplica o novo grupo à sessão atual, sem precisar deslogar
+groups                         # lista os grupos do usuário — "docker" precisa aparecer
+docker ps                      # teste final: tem que funcionar SEM sudo
+```
+
+| Comando | Por que é necessário |
+| --- | --- |
+| `sudo usermod -aG docker $USER` | Concede a permissão. O `-a` é essencial: **sem ele**, o `-G` *substitui* todos os seus grupos em vez de acrescentar um |
+| `newgrp docker` | A associação a grupos só é lida no login. Este comando aplica a mudança agora |
+| `groups` | Confirma que a permissão foi concedida de fato |
+| `docker ps` | Confirma que ela funciona na prática |
+
+**Como saber que deu certo:** o `docker ps` responde a listagem — mesmo vazia — em vez do erro de
+permissão.
+
+```text
+$ groups
+rafael sudo docker
+
+$ docker ps
+CONTAINER ID   IMAGE   COMMAND   CREATED   STATUS   PORTS   NAMES
+```
+
+> 💡 Se ainda falhar, encerre a sessão e entre de novo — ou, em último caso, `sudo reboot`.
+> Normalmente **não** é preciso reiniciar o serviço do Docker.
+
+> ⚠️ Neste laboratório o Docker vem do **Docker Desktop no Windows**, integrado ao WSL 2 pela
+> [etapa 7](#7-integrar-o-docker-desktop-ao-wsl-2) — o que já resolve a permissão. Esta seção vale
+> para uma instalação nativa do Docker Engine em Linux.
+
+---
+
+### N. Limpeza do ambiente
+
+**O que vamos fazer:** recuperar espaço em disco. Builds repetidos deixam para trás imagens órfãs e
+cache — em máquinas modestas, isso vira gigabytes rapidamente.
+
+Antes de apagar qualquer coisa, tire a radiografia:
+
+```bash
+docker system df  # quanto ocupam imagens, containers, volumes e cache de build
+```
+
+```text
+TYPE            TOTAL     ACTIVE    SIZE      RECLAIMABLE
+Images          12        3         6.2GB     4.1GB (66%)
+Containers      5         3         120MB     40MB (33%)
+Local Volumes   4         1         890MB     620MB (69%)
+Build Cache     38        0         2.4GB     2.4GB
+```
+
+A coluna `RECLAIMABLE` diz quanto dá para recuperar — e evita limpar o que não precisava ser limpo.
+
+```bash
+docker image prune          # remove imagens "penduradas" (sem tag, sobras de builds)
+docker image prune -a       # remove TODAS as imagens não usadas por algum container
+docker image prune -a -f    # o mesmo, sem pedir confirmação (-f de "force")
+docker builder prune -f     # limpa o cache de build não utilizado
+docker builder prune -a -f  # limpeza agressiva do cache
+docker container prune -f   # remove todos os containers parados
+docker volume ls            # LISTA os volumes — sempre antes de apagar qualquer um
+docker volume rm <nome>     # remove um volume específico, escolhido por você
+docker volume prune -f      # remove todos os volumes não utilizados
+```
+
+| Comando | Risco | O que você perde |
+| --- | :-: | --- |
+| `docker builder prune -f` | 🟢 Baixo | Só cache — o próximo build fica mais lento, nada além disso |
+| `docker container prune -f` | 🟢 Baixo | Containers parados. Os dados em volume continuam lá |
+| `docker image prune` | 🟢 Baixo | Imagens sem tag, que já eram lixo |
+| `docker image prune -a` | 🟡 Médio | Imagens que você teria de baixar ou reconstruir depois |
+| `docker volume prune -f` | 🔴 **Alto** | **Dados.** Bancos de dados, uploads, tudo que era persistente |
+
+> ⚠️ **A imagem pode ser refeita; o dado, não.** Uma imagem apagada por engano volta com um
+> `docker build` ou um `docker pull`. Um volume apagado por engano leva junto o banco de dados — e
+> não há desfazer. **Nunca** rode `docker volume prune` sem antes conferir o `docker volume ls`.
+
+**Como saber que deu certo:** rode `docker system df` de novo e compare a coluna `RECLAIMABLE`.
+
+---
+
+### O. O fluxo mental completo
+
+Se você guardar uma única coisa deste apêndice, que seja esta sequência.
+
+![Fluxo mental final: o Dockerfile é a receita que define como construir, a Imagem é o molde que define o que será executado e o Container é a instância viva — com o Docker Compose orquestrando e o Git versionando tudo](imagens/git-docker/fluxo-mental-final.png)
+
+```text
+Dockerfile
+    │  docker build      "COMO construir"
+    ▼
+Imagem
+    │  docker run        "O QUE será executado"
+    ▼
+Container
+    │  docker compose    "quem sobe junto com quem"
+    ▼
+Aplicação rodando
+```
+
+| Peça | Analogia | Papel | O que a produz |
+| --- | --- | --- | --- |
+| **Dockerfile** | A receita | Define **como** construir | você escreve |
+| **Imagem** | O molde | Define **o que** será executado | `docker build` |
+| **Container** | A instância | O objeto vivo, criado a partir do molde | `docker run` |
+| **Compose** | O maestro | Gerencia vários containers juntos | `docker compose up` |
+
+E, envolvendo tudo isso, o **Git**: a malha de segurança que versiona não só o código, mas também o
+`Dockerfile` e o `compose.yaml` — ou seja, **a própria infraestrutura**.
+
+> **Dockerfile → constrói a Imagem → a Imagem cria o Container → o Compose orquestra os Containers.**
+> Tudo isso, versionado pelo Git, forma a arquitetura base para a nuvem.
+
+---
+
+### P. Checklist de validação
+
+**O que vamos fazer:** cinco comandos que confirmam que o ambiente inteiro está de pé. Se todos
+responderem como esperado, Git e Docker estão prontos.
+
+![Flight checklist de validação do desafio: git status, docker run hello-world, docker images, docker ps e docker compose ps, cada um com a pergunta que responde](imagens/git-docker/checklist-git-docker.png)
+
+```bash
+git status              # 1. a árvore de trabalho está limpa?
+docker run hello-world  # 2. o engine responde? (baixa a imagem se não existir, roda e sai)
+docker images           # 3. as imagens estão registradas?
+docker ps               # 4. o container está de pé, com a porta publicada?
+docker compose ps       # 5. o Compose enxerga todos os serviços do projeto?
+```
+
+| # | Comando | O que confirma | Resposta esperada |
+| :-: | --- | --- | --- |
+| 1 | `git status` | O repositório está limpo e o `.gitignore` funciona | `nothing to commit, working tree clean` |
+| 2 | `docker run hello-world` | O Docker Engine responde — e sem exigir `sudo` | `Hello from Docker!` |
+| 3 | `docker images` | A sua imagem foi construída e está registrada | A imagem aparece com `REPOSITORY`, `TAG` e `SIZE` |
+| 4 | `docker ps` | O container está no ar e a porta está mapeada | `STATUS` em `Up` e a coluna `PORTS` preenchida |
+| 5 | `docker compose ps` | O orquestrador reconheceu todos os serviços | Todos os serviços com estado `Up` |
+
+O `docker run hello-world` merece uma explicação à parte, porque demonstra o ciclo inteiro em um
+comando só: o Docker procura a imagem `hello-world` na máquina; **não encontra**; baixa do Docker
+Hub; cria um container a partir dela; executa; imprime a mensagem; e o container encerra. É o
+[smoke test](#8-smoke-test-do-docker-compose) mais barato que existe.
+
+**Se os cinco passarem:** o código está versionado, o ambiente está padronizado e a infraestrutura é
+reproduzível — que é exatamente o ponto de partida das 22 etapas deste desafio.
 
 ---
 
